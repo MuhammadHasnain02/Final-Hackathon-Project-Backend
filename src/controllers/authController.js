@@ -4,10 +4,10 @@ import { generateAccessToken, generateRefreshToken } from "../utils/token.js";
 
 export const register = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
-    if (!email || !password) {
-      return res.status(400).json({ message: "Email and password are required" });
+    if (!email || !password || !role) {
+      return res.status(400).json({ message: "Email, password, and role are required" });
     }
 
     const existingUser = await User.findOne({ email });
@@ -15,7 +15,8 @@ export const register = async (req, res) => {
       return res.status(409).json({ message: "Email already in use" });
     }
 
-    const user = await User.create({ email, password });
+    // Use constructor to create user instance without immediate save
+    const user = new User({ email, password, role });
 
     const accessToken = generateAccessToken(user._id);
     const refreshToken = generateRefreshToken(user._id);
@@ -26,10 +27,25 @@ export const register = async (req, res) => {
     res.status(201).json({
       accessToken,
       refreshToken,
-      user: { id: user._id, email: user.email },
+      user: { 
+        id: user._id, 
+        email: user.email, 
+        role: user.role, 
+        hasCompletedOnboarding: user.hasCompletedOnboarding 
+      },
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    console.error("CRITICAL REGISTER ERROR:", err);
+    
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ message: "Validation error", errors: Object.values(err.errors).map(e => e.message), stack: err.stack });
+    }
+    
+    if (err.code === 11000) {
+      return res.status(409).json({ message: "Email already exists", stack: err.stack });
+    }
+
+    res.status(500).json({ message: "Registration failed", error: err.message, stack: err.stack });
   }
 };
 
@@ -60,7 +76,12 @@ export const login = async (req, res) => {
     res.json({
       accessToken,
       refreshToken,
-      user: { id: user._id, email: user.email },
+      user: { 
+        id: user._id, 
+        email: user.email,
+        role: user.role,
+        hasCompletedOnboarding: user.hasCompletedOnboarding
+      },
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -113,7 +134,53 @@ export const me = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
-    res.json({ user: { id: user._id, email: user.email } });
+    res.json({ 
+      user: { 
+        id: user._id, 
+        email: user.email,
+        role: user.role,
+        hasCompletedOnboarding: user.hasCompletedOnboarding,
+        fullName: user.fullName,
+        skills: user.skills,
+        interests: user.interests,
+        location: user.location
+      } 
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+export const onboarding = async (req, res) => {
+  try {
+    const { fullName, skills, interests, location } = req.body;
+
+    const user = await User.findById(req.user.userId);
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    user.fullName = fullName || user.fullName;
+    user.skills = skills || user.skills;
+    user.interests = interests || user.interests;
+    user.location = location || user.location;
+    user.hasCompletedOnboarding = true;
+
+    await user.save();
+
+    res.json({
+      message: "Onboarding completed successfully",
+      user: {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+        hasCompletedOnboarding: user.hasCompletedOnboarding,
+        fullName: user.fullName,
+        skills: user.skills,
+        interests: user.interests,
+        location: user.location
+      }
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
